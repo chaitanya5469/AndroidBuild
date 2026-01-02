@@ -18,23 +18,30 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build Android APK inside Docker (capture logs)
+        id: docker_build
+        continue-on-error: true
         run: |
           docker build -t android-builder . 2>&1 | tee build.log
           
       - name: Analyze build failure with Gemini
-        if: failure()
+        if: steps.docker_build.outcome == 'failure'
         run: |
-          ERROR_LOG=$(tail -n 200 build.log)
+          echo "===== BUILD FAILED: SENDING LOGS TO GEMINI ====="
 
-          curl -s https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${{ secrets.GEMINI_API_KEY }} \
+          ERROR_LOG=$(tail -n 200 build.log | sed 's/"/\\"/g')
+
+          RESPONSE=$(curl -s https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${{ secrets.GEMINI_API_KEY }} \
           -H "Content-Type: application/json" \
           -d "{
             \"contents\": [{
               \"parts\": [{
-                \"text\": \"Analyze this Android Gradle build error and suggest a fix:\\n${ERROR_LOG}\"
+                \"text\": \"Analyze this Android Gradle Kotlin compilation error and suggest a fix:\\n${ERROR_LOG}\"
               }]
             }]
-          }"
+          }")
+          echo "===== GEMINI RESPONSE ====="
+          echo "$RESPONSE"
+
 
 
       - name: Extract APK
