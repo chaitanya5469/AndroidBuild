@@ -17,9 +17,25 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Android APK inside Docker
+      - name: Build Android APK inside Docker (capture logs)
         run: |
-          docker build -t android-builder .
+          docker build -t android-builder . 2>&1 | tee build.log
+          
+      - name: Analyze build failure with Gemini
+        if: failure()
+        run: |
+          ERROR_LOG=$(tail -n 200 build.log)
+
+          curl -s https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${{ secrets.GEMINI_API_KEY }} \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"contents\": [{
+              \"parts\": [{
+                \"text\": \"Analyze this Android Gradle build error and suggest a fix:\\n${ERROR_LOG}\"
+              }]
+            }]
+          }"
+
 
       - name: Extract APK
         run: |
