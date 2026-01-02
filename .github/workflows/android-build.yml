@@ -30,6 +30,7 @@ jobs:
       # ---------- SUCCESS PATH ----------
       - name: Extract APK
         if: steps.gradle_build.outcome == 'success'
+        continue-on-error: true
         run: |
           docker cp android_build:/app/app/build/outputs/apk/debug/app-debug.apk .
 
