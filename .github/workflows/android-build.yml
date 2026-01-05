@@ -73,8 +73,8 @@ jobs:
               }]
             }")
 
-          echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // "Error: " + (. | tostring)'
-          echo "$RESPONSE" > gemini.txt
+          echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text' > gemini.txt
+
 
       - name: Upload Gemini analysis
         if: steps.gradle_build.outputs.exit_code != '0'
