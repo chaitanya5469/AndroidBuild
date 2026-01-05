@@ -57,7 +57,7 @@ jobs:
           echo "===== ANDROID BUILD FAILED ====="
 
           # Extract just the key error lines
-          ERROR_SUMMARY=$(grep -A 5 "Caused by:" build.log | tail -20 | sed 's/"/\\"/g' | tr '\n' ' ')
+          ERROR_SUMMARY=$(grep -E "e: |error: " build.log | head -20 | sed 's/"/\\"/g' | tr '\n' ' ')
 
           echo "Error summary: ${ERROR_SUMMARY}"
 
@@ -74,8 +74,16 @@ jobs:
             }")
 
           echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // "Error: " + (. | tostring)'
+          echo "$RESPONSE" > gemini.txt
 
           exit 1
+
+      - name: Upload Gemini analysis
+        if: steps.gradle_build.outputs.exit_code != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemini-analysis
+          path: gemini.txt
 
       # ---------- CLEANUP (ALWAYS) ----------
       - name: Cleanup container
