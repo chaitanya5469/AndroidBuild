@@ -32,16 +32,11 @@ jobs:
           BUILD_EXIT_CODE=$?
           echo "exit_code=${BUILD_EXIT_CODE}" >> "$GITHUB_OUTPUT"
 
-          if [ "$BUILD_EXIT_CODE" -ne 0 ]; then
-            echo "Build failed with exit code: $BUILD_EXIT_CODE"
-            exit 1
-          fi
-
       # ---------- SUCCESS PATH ----------
       - name: Extract APK
         if: steps.gradle_build.outputs.exit_code == '0'
         run: |
-          docker cp android_build:/app/app/build/outputs/apk/debug/app-debug.apk .
+          docker cp android_build:/app/app/build/outputs/apk/debug/app-debug.apk ./app-debug.apk
 
       - name: Upload APK artifact
         if: steps.gradle_build.outputs.exit_code == '0'
@@ -50,7 +45,7 @@ jobs:
           name: app-debug-apk
           path: app-debug.apk
 
-      # ---------- FAILURE PATH (AI ANALYSIS) ----------
+      # ---------- FAILURE PATH (BUILD AI ANALYSIS) ----------
       - name: Analyze build failure with Gemini
         if: steps.gradle_build.outputs.exit_code != '0'
         env:
@@ -58,13 +53,12 @@ jobs:
         run: |
           echo "===== ANDROID BUILD FAILED ====="
 
-          ERROR_SUMMARY=$(grep -E "e: |error: " build.log \
-            | head -20 \
-            | sed 's/"/\\"/g' \
-            | tr '\n' ' ')
+          ERROR_SUMMARY=$(grep -E "FAILURE:|Execution failed|error:|e: |Exception" build.log \
+            | head -20 | sed 's/"/\\"/g' | tr '\n' ' ')
 
-          echo "Error summary: $ERROR_SUMMARY"
-          echo "===== GEMINI ANALYSIS ====="
+          if [ -z "$ERROR_SUMMARY" ]; then
+            ERROR_SUMMARY="Android Gradle build failed. No specific compiler errors were detected."
+          fi
 
           RESPONSE=$(curl -s \
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}" \
@@ -78,28 +72,19 @@ jobs:
             }")
 
           TEXT=$(echo "$RESPONSE" | jq -r '
-            if .candidates
-               and .candidates[0]
-               and .candidates[0].content
-               and .candidates[0].content.parts
-            then
-              [.candidates[0].content.parts[].text] | join("\n")
-            else
-              empty
+            if .candidates and .candidates[0].content.parts
+            then [.candidates[0].content.parts[].text] | join("\n")
+            else "Gemini did not return analysis text."
             end
           ')
 
-          if [ -z "$TEXT" ]; then
-            TEXT="Gemini did not return analysis text for this build. This can happen due to safety filtering or an empty generation."
-          fi
-
           echo "$TEXT" > gemini.txt
 
-      - name: Upload Gemini analysis
+      - name: Upload Gemini build analysis
         if: steps.gradle_build.outputs.exit_code != '0'
         uses: actions/upload-artifact@v4
         with:
-          name: gemini-analysis
+          name: gemini-build-analysis
           path: gemini.txt
 
       # ---------- CLEANUP ----------
@@ -108,9 +93,66 @@ jobs:
         run: |
           docker rm -f android_build || true
 
-      # ---------- FINAL STATUS ----------
-      - name: Mark job as failed after AI analysis
-        if: steps.gradle_build.outputs.exit_code != '0'
+      # =====================================================
+      # =============== UPDATED TEST SECTION ================
+      # =====================================================
+
+      # ---------- UNIT TEST PHASE (INSIDE DOCKER) ----------
+      - name: Run unit tests inside Docker (capture logs)
+        id: test_phase
+        if: steps.gradle_build.outputs.exit_code == '0'
+        continue-on-error: true
         run: |
-          echo "Failing job due to Android build failure"
-          exit 1
+          docker run --rm android-builder \
+            ./gradlew testDebugUnitTest --stacktrace --no-daemon \
+            2>&1 | tee test.log
+
+          TEST_EXIT_CODE=${PIPESTATUS[0]}
+          echo "exit_code=${TEST_EXIT_CODE}" >> "$GITHUB_OUTPUT"
+
+      # ---------- TEST FAILURE AI ANALYSIS ----------
+      - name: Analyze test failure with Gemini
+        if: steps.test_phase.outputs.exit_code != '0'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          echo "===== TEST FAILURE DETECTED ====="
+
+          TEST_SUMMARY=$(grep -E "FAILED|Exception|AssertionError|Caused by:" test.log \
+            | tail -50 | sed 's/"/\\"/g')
+
+          RESPONSE=$(curl -s \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"contents\": [{
+                \"parts\": [{
+                  \"text\": \"Analyze these Android unit test failures and suggest fixes:\\n${TEST_SUMMARY}\"
+                }]
+              }]
+            }")
+
+          TEXT=$(echo "$RESPONSE" | jq -r '
+            if .candidates and .candidates[0].content.parts
+            then [.candidates[0].content.parts[].text] | join("\n")
+            else "Gemini did not return test analysis."
+            end
+          ')
+
+          echo "$TEXT" > gemini-test-analysis.txt
+
+      - name: Upload Gemini test analysis
+        if: steps.test_phase.outputs.exit_code != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemini-test-analysis
+          path: gemini-test-analysis.txt
+
+      # ---------- FINAL STATUS ----------
+      - name: Fail job due to test failure
+        if: steps.test_phase.outputs.exit_code != '0'
+        run: exit 1
+
+      - name: Fail job due to build failure
+        if: steps.gradle_build.outputs.exit_code != '0'
+        run: exit 1
