@@ -121,7 +121,7 @@ jobs:
           TEST_SUMMARY=$(grep -E "FAILED|Exception|AssertionError|Caused by:" test.log \
             | tail -50 | sed 's/"/\\"/g'| tr '\n' ' ')
           
-          echo "$RESPONSE"
+          echo "$TEST_SUMMARY"
 
           RESPONSE=$(curl -s \
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}" \
