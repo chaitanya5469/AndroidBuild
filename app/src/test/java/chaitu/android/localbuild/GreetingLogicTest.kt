@@ -9,7 +9,7 @@ class GreetingLogicTest {
     @Test
     fun `valid name returns greeting`() {
         val result = GreetingLogic.buildGreeting("Android")
-        assertEquals("Hello Android!", result)
+        assertEquals("Hello Android!!", result)
     }
 
     @Test
