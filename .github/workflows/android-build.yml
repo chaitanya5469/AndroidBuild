@@ -146,7 +146,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gemini-test-analysis
-          path: gemini-test-analysis.txt
+          path: gemini.txt
 
       # ---------- FINAL STATUS ----------
       - name: Fail job due to test failure
